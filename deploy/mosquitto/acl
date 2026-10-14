@@ -1,0 +1,17 @@
+# ACL пилота. Подробности в README.MD.
+# Брокер читает не этот файл напрямую, а копию в томе: при старте entrypoint
+# копирует его в /mosquitto/passwd/acl и ставит владельца mosquitto, права 600.
+# Строка `user` должна совпадать с MQTT_WORKER_USERNAME.
+# Префикс топиков должен совпадать с MQTT_TOPIC_PREFIX.
+# username MQTT — это имя контура. %u в pattern подставляет его целиком на один уровень топика.
+
+# Воркер читает все запросы и пишет все ответы.
+user forecast-worker
+topic read forecast/v1/+/request
+topic write forecast/v1/+/response
+
+# Любой другой пользователь пишет только в свой request и читает только свой response.
+# Pattern действует и на forecast-worker: ему дополнительно доступен свой собственный response,
+# этим пользуется healthcheck брокера.
+pattern write forecast/v1/%u/request
+pattern read forecast/v1/%u/response
