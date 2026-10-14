@@ -1,0 +1,76 @@
+# Пилот прогноза временных рядов: брокер MQTT и один воркер моделей.
+# Переменные подставляются из файла .env в этом каталоге.
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    # Свой entrypoint собирает пароли. Команду брокера задаём явно:
+    # при замене entrypoint Compose не подставляет CMD образа.
+    entrypoint: ["/bin/sh", "/opt/mosquitto-entrypoint.sh"]
+    command: ["/usr/sbin/mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+    env_file:
+      - .env
+    ports:
+      # Слева порт хоста, справа порт внутри контейнера. Его менять не нужно.
+      - "${MQTT_PUBLISH_PORT:-1883}:1883"
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/mosquitto/acl:/mosquitto/config/acl:ro
+      - ./deploy/mosquitto/init-passwd.sh:/opt/init-passwd.sh:ro
+      - ./deploy/mosquitto/entrypoint.sh:/opt/mosquitto-entrypoint.sh:ro
+      - ./deploy/mosquitto/clients.extra:/clients.extra:ro
+      - mosquitto-passwd:/mosquitto/passwd
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      # -E: выйти сразу после подтверждения подписки, не ждать сообщение.
+      test:
+        [
+          "CMD-SHELL",
+          "prefix=\"$${MQTT_TOPIC_PREFIX:-forecast/v1}\"; mosquitto_sub -h 127.0.0.1 -p 1883 -u \"$$MQTT_WORKER_USERNAME\" -P \"$$MQTT_WORKER_PASSWORD\" -t \"$$prefix/$$MQTT_WORKER_USERNAME/response\" -E -W 5 -i health-$$RANDOM -q 0",
+        ]
+      interval: 10s
+      timeout: 8s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  forecast:
+    build:
+      context: .
+      args:
+        TORCH_INDEX: ${TORCH_INDEX:-https://download.pytorch.org/whl/cpu}
+    env_file:
+      - .env
+    environment:
+      # Хост и порт брокера внутри сети compose. Не берите их из MQTT_PUBLISH_PORT:
+      # это порт на хосте, а контейнер ходит по имени сервиса на внутренний 1883.
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      HF_HOME: /opt/hf
+    volumes:
+      - hf-cache:/opt/hf
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib,sys; sys.exit(0 if pathlib.Path('/tmp/forecast-healthy').is_file() else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 3m
+    restart: unless-stopped
+    # GPU не пробрасывается, пока строка ниже закомментирована.
+    # Раскомментируйте после установки nvidia-container-toolkit и смены TORCH_INDEX / CHRONOS_DEVICE.
+    # gpus: all
+
+volumes:
+  mosquitto-passwd:
+  mosquitto-data:
+  hf-cache:

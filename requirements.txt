@@ -1,0 +1,5 @@
+paho-mqtt>=2.1.0,<3
+pydantic>=2.6,<3
+pandas>=2.2,<4
+prophet>=1.2,<2
+chronos-forecasting>=2.0,<3
